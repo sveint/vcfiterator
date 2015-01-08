@@ -24,15 +24,14 @@ It does not yet support tabix indexing or compressed VCF files.
 ## Usage
 
 ```
+v = VcfIterator(path)
 
-    v = VcfIterator(path)
-
-    # Print all VEP info for all variants
-    for variant in v.iter():
-        alleles = variant['ALT']
-        for allele in alleles:
-            print allele
-            print value['INFO'][allele]['CSQ']
+# Print all VEP info for all variants
+for variant in v.iter():
+    alleles = variant['ALT']
+    for allele in alleles:
+        print allele
+        print variant['INFO'][allele]['CSQ']
 ```
 
 ## Example output
