@@ -145,8 +145,9 @@ class CsvAlleleParser(object):
     """
     Parses comma separated values, and inserts them into the data according to the allele the value belongs to.
     """
-    def __init__(self, meta):
+    def __init__(self, meta, conv_func=None):
         self.meta = meta
+        self.conv_func = (lambda x: x) if conv_func is None else conv_func
 
     def parse(self, key, value, info_data, alleles):
         allele_values = value.split(',')
@@ -154,7 +155,7 @@ class CsvAlleleParser(object):
             raise RuntimeError("Number of allele values for {} not matching number of alleles".format(key))
 
         for a_idx, allele in enumerate(alleles):
-            info_data[allele][key] = allele_values[a_idx]
+            info_data[allele][key] = self.conv_func(allele_values[a_idx])
 
 
 class HeaderParser(object):
@@ -228,10 +229,10 @@ class DataParser(object):
         self.infoProcessors.update({
             SnpEffInfo.field: SnpEffInfo(self.meta).parse,
             VEPInfo.field: VEPInfo(self.meta).parse,
-            'AC': CsvAlleleParser(self.meta).parse,
-            'AF': CsvAlleleParser(self.meta).parse,
-            'MLEAC': CsvAlleleParser(self.meta).parse,
-            'MLEAF': CsvAlleleParser(self.meta).parse,
+            'AC': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
+            'AF': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
+            'MLEAC': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
+            'MLEAF': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
         })
 
     def _generateInfoProcessors(self):
@@ -245,7 +246,7 @@ class DataParser(object):
         """
         processors = dict()
         for f in self.meta['INFO']:
-            parse_func = str
+            parse_func = Util.conv_to_number
             if f['Type'] == 'Integer':
                 parse_func = int
             elif f['Type'] in ['Number', 'Double', 'Float']:
