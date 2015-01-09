@@ -3,38 +3,55 @@ from collections import defaultdict
 import re
 
 
-def conv_to_number(value):
-    """
-    Tries to convert a string to a number, silently returning the originally value if it fails.
-    """
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    return value
+# Official fields in specification
+SPEC_FIELDS = [
+    'CHROM',
+    'POS',
+    'ID',
+    'REF',
+    'ALT',
+    'QUAL',
+    'FILTER',
+    'INFO',
+    'FORMAT'
+]
 
 
-def split_and_convert(conv_func, split_max=-1, extract_single=False):
-    """
-    Performs a normal split() on a string, with support for converting the values and extraction of single values.
+class Util(object):
 
-    :param conv_func: Function for converting the values
-    :type conv_func: functions
-    :param split_max: Maximum number of splits to perform. Default: No limit.
-    :type split_max: int
-    :param extract_single: If value ends up being a single value, do not return a list. Default: False
-    :type extract_single: bool
-    """
-    def inner(x):
-        l = [conv_func(i) for i in x.split(',', split_max)]
-        if len(l) == 1 and extract_single:
-            l = l[0]
-        return l
-    return inner
+    @staticmethod
+    def conv_to_number(value):
+        """
+        Tries to convert a string to a number, silently returning the originally value if it fails.
+        """
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        return value
+
+    @staticmethod
+    def split_and_convert(conv_func, split_max=-1, extract_single=False):
+        """
+        Performs a normal split() on a string, with support for converting the values and extraction of single values.
+
+        :param conv_func: Function for converting the values
+        :type conv_func: functions
+        :param split_max: Maximum number of splits to perform. Default: No limit.
+        :type split_max: int
+        :param extract_single: If value ends up being a single value, do not return a list. Default: False
+        :type extract_single: bool
+        """
+        def inner(x):
+            l = [conv_func(i) for i in x.split(',', split_max)]
+            if len(l) == 1 and extract_single:
+                l = l[0]
+            return l
+        return inner
 
 
 class VEPInfo(object):
@@ -155,6 +172,9 @@ class HeaderParser(object):
             'FORMAT': self._parseMetaInfo
         }
 
+    def _getSamples(self, header):
+        return [field for field in header if field not in SPEC_FIELDS]
+
     def _parseMetaInfo(self, infoline):
         groups = re.findall(HeaderParser.RE_INFO, infoline)
         info = {k: v for k, v in groups}
@@ -189,7 +209,8 @@ class HeaderParser(object):
             if len(v) == 1:
                 meta[k] = v[0]
 
-        return meta, header
+        samples = self._getSamples(header)
+        return meta, header, samples
 
     def parse(self):
         return self._parseHeader()
@@ -197,23 +218,11 @@ class HeaderParser(object):
 
 class DataParser(object):
 
-    # Official fields in specification
-    SPEC_FIELDS = [
-        'CHROM',
-        'POS',
-        'ID',
-        'REF',
-        'ALT',
-        'QUAL',
-        'FILTER',
-        'INFO',
-        'FORMAT'
-    ]
-
-    def __init__(self, path, meta, header):
+    def __init__(self, path, meta, header, samples):
         self.path = path
         self.meta = meta
         self.header = header
+        self.samples = samples
 
         self.infoProcessors = self._generateInfoProcessors()
         self.infoProcessors.update({
@@ -249,11 +258,11 @@ class DataParser(object):
             try:
                 # Number == int
                 n = int(number)
-                func = split_and_convert(parse_func, split_max=n, extract_single=True)
+                func = Util.split_and_convert(parse_func, split_max=n, extract_single=True)
             except ValueError:
                 # Number == Allele specific
                 if number == 'A':
-                    func = split_and_convert(parse_func)
+                    func = Util.split_and_convert(parse_func)
                 # Number == Unknown
                 else:
                     func = parse_func
@@ -296,16 +305,13 @@ class DataParser(object):
         data['INFO'] = info_data
 
     def _parseDataSampleFields(self, data):
-        # Any fields not part of spec if a sample
-        sample_fields = [f for f in self.header if f not in DataParser.SPEC_FIELDS]
-
         sample_format = data['FORMAT'].split(':')
 
         samples = dict()
-        extract = split_and_convert(conv_to_number, extract_single=True)
-        for sample_field in sample_fields:
-            sample_text = data.pop(sample_field)
-            samples[sample_field] = {
+        extract = Util.split_and_convert(Util.conv_to_number, extract_single=True)
+        for sample_name in self.samples:
+            sample_text = data.pop(sample_name)
+            samples[sample_name] = {
                 k: extract(v) for k, v in zip(sample_format, sample_text.split(':'))
             }
 
@@ -351,7 +357,7 @@ class VcfIterator(object):
     def __init__(self, path):
         self.path = path
 
-        self.meta, self.header = HeaderParser(self.path).parse()
+        self.meta, self.header, self.samples = HeaderParser(self.path).parse()
 
     def getHeader(self):
         return self.header
@@ -359,8 +365,11 @@ class VcfIterator(object):
     def getMeta(self):
         return self.meta
 
+    def getSamples(self):
+        return self.samples
+
     def iter(self):
-        d = DataParser(self.path, self.meta, self.header)
+        d = DataParser(self.path, self.meta, self.header, self.samples)
         for r in d.iter():
             yield r
 
