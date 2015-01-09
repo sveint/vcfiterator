@@ -333,8 +333,8 @@ class DataParser(object):
         self._parseDataSampleFields(data)
 
         # Manual conversion
-        data['POS'] = int(data['POS'])
-        data['QUAL'] = float(data['QUAL'])
+        data['POS'] = Util.conv_to_number(data['POS'])
+        data['QUAL'] = Util.conv_to_number(data['QUAL'])
 
         return data
 
