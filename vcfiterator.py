@@ -65,9 +65,19 @@ class VEPInfo(object):
         self.meta = meta
         self.fields = self._parseFieldsFromMeta()
         self.converters = {
-            'DISTANCE': int,
+            'AA_MAF': float,
+            'AFR_MAF': float,
+            'AMR_MAF': float,
             'ALLELE_NUM': int,
-            'STRAND': int
+            'ASN_MAF': float,
+            'CDS_position': int,
+            'cDNA_position': int,
+            'EA_MAF': float,
+            'EUR_MAF': float,
+            'DISTANCE': int,
+            'STRAND': int,
+            'Protein_position': int,
+            'PUBMED': lambda x: x.split('&'),
         }
 
     def _parseFieldsFromMeta(self):
