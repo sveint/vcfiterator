@@ -1,6 +1,7 @@
 import sys
 from collections import defaultdict
 import re
+import abc
 
 
 # Official fields in specification
@@ -54,7 +55,20 @@ class Util(object):
         return inner
 
 
-class VEPInfo(object):
+class BaseInfoProcessor(object):
+
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def accepts(self, key, value):
+        pass
+
+    @abc.abstractmethod
+    def process(self, key, value, info_data, alleles):
+        pass
+
+
+class VEPInfoProcessor(BaseInfoProcessor):
     """
     Parser for the VEP INFO field.
     """
@@ -81,13 +95,16 @@ class VEPInfo(object):
         }
 
     def _parseFieldsFromMeta(self):
-        info_line = next((l for l in self.meta['INFO'] if l.get('ID') == VEPInfo.field), None)
+        info_line = next((l for l in self.meta['INFO'] if l.get('ID') == VEPInfoProcessor.field), None)
         if info_line:
             fields = info_line['Description'].split('Format: ', 1)[1].split('|')
             return fields
         return list()
 
-    def parse(self, key, value, info_data, alleles):
+    def accepts(self, key, value):
+        return key == VEPInfoProcessor.field
+
+    def process(self, key, value, info_data, alleles):
         transcripts = value.split(',')
 
         all_data = [
@@ -100,7 +117,7 @@ class VEPInfo(object):
             info_data[allele][key] = [d for d in all_data if d['ALLELE_NUM']-1 == a_idx]
 
 
-class SnpEffInfo(object):
+class SnpEffInfoProcessor(BaseInfoProcessor):
     """
     Parser for the snpEff INFO field.
     """
@@ -131,14 +148,17 @@ class SnpEffInfo(object):
         return fields
 
     def _parseFieldsFromMeta(self):
-        info_line = next((l for l in self.meta['INFO'] if l.get('ID') == SnpEffInfo.field), None)
+        info_line = next((l for l in self.meta['INFO'] if l.get('ID') == SnpEffInfoProcessor.field), None)
         if info_line:
             fields = self._parseFormat(info_line['Description'].split('Format: \'', 1)[1])
             fields.append('ERRORS')
             return fields
         return list()
 
-    def parse(self, key, value, info_data, alleles):
+    def accepts(self, key, value):
+        return key == SnpEffInfoProcessor.field
+
+    def process(self, key, value, info_data, alleles):
         transcripts = value.split(',')
 
         all_data = [
@@ -151,15 +171,21 @@ class SnpEffInfo(object):
             info_data[allele][key] = [d for d in all_data if d['Genotype_Number']-1 == a_idx]
 
 
-class CsvAlleleParser(object):
+class CsvAlleleParser(BaseInfoProcessor):
     """
     Parses comma separated values, and inserts them into the data according to the allele the value belongs to.
     """
-    def __init__(self, meta, conv_func=None):
-        self.meta = meta
-        self.conv_func = (lambda x: x) if conv_func is None else conv_func
 
-    def parse(self, key, value, info_data, alleles):
+    fields = ['AC', 'AF', 'MLEAC', 'MLEAF']
+
+    def __init__(self, meta):
+        self.meta = meta
+        self.conv_func = Util.conv_to_number
+
+    def accepts(self, key, value):
+        return key in CsvAlleleParser.fields
+
+    def process(self, key, value, info_data, alleles):
         allele_values = value.split(',')
         if not len(allele_values) == len(alleles):
             raise RuntimeError("Number of allele values for {} not matching number of alleles".format(key))
@@ -235,34 +261,33 @@ class DataParser(object):
         self.header = header
         self.samples = samples
 
-        self.infoProcessors = self._generateInfoProcessors()
-        self.infoProcessors.update({
-            SnpEffInfo.field: SnpEffInfo(self.meta).parse,
-            VEPInfo.field: VEPInfo(self.meta).parse,
-            'AC': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
-            'AF': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
-            'MLEAC': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
-            'MLEAF': CsvAlleleParser(self.meta, Util.conv_to_number).parse,
-        })
+        self.infoProcessors = list()
 
-    def _generateInfoProcessors(self):
+    def addInfoProcessor(self, processor):
+        self.infoProcessors.append(processor)
+
+    def _nativeInfoProcessor(self, key, value, info_data, alleles):
         """
-        Generates the different processors to handle the keys in the INFO field.
+        Fallback processor, invoked if none of the custom ones accepted the data.
 
-        These processors are generated from INFO fields in the header metadata, using the specified type and length.
+        It searched the INFO fields in the header metadata, trying to use the specified type and length.
 
-        Unlike the custom processors (e.g. VEPInfo), it does not generate allele specific data. Instead, all data is put
+        Unlike custom processors (e.g. VEPInfoProcessor), it does not generate allele specific data. Instead, all data is put
         into the 'ALL' key in 'INFO' in the resulting dictionary.
         """
-        processors = dict()
-        for f in self.meta['INFO']:
-            parse_func = Util.conv_to_number
+
+        # Search for meta item
+        f = next((m for m in self.meta['INFO'] if m['ID'] == key), None)
+        if f:
+            parse_func = str
             if f['Type'] == 'Integer':
                 parse_func = int
             elif f['Type'] in ['Number', 'Double', 'Float']:
                 parse_func = float
             elif f['Type'] == 'Flag':
                 parse_func = bool
+            elif f['Type'] == 'String':
+                parse_func = str
 
             number = f['Number']
 
@@ -279,13 +304,11 @@ class DataParser(object):
                     func = parse_func
 
             # We ignore alleles for these values, but return them in the 'ALL' key
-            def val_func(key, value, info_data, alleles):
-                info_data['ALL'][key] = func(value)
+            info_data['ALL'][key] = func(value)
 
-            # Add processor for this value, recognized by it's ID
-            processors[f['ID']] = val_func
-
-        return processors
+        else:
+            # Value not recognized in header, insert as is
+            info_data['ALL'][key] = value
 
     def _parseDataInfoField(self, data):
         """
@@ -307,9 +330,16 @@ class DataParser(object):
         for f in fields:
             if '=' in f:
                 key, value = f.split('=', 1)
-                # Process keys by processor, if present, or just give value
+                # Process keys by processor, if present, or use native processor
                 # Data is inserted into info_data by the functions
-                self.infoProcessors[key](key, value, info_data, alleles)
+                processed = False
+                for processor in self.infoProcessors:
+                    if processor.accepts(key, value):
+                        processor.process(key, value, info_data, alleles)
+                        processed = True
+                # If no processors handled the data, use the native header processor
+                if not processed:
+                    self._nativeInfoProcessor(key, value, info_data, alleles)
             else:
                 info_data['ALL'][f] = True
 
@@ -367,8 +397,12 @@ class VcfIterator(object):
 
     def __init__(self, path):
         self.path = path
-
         self.meta, self.header, self.samples = HeaderParser(self.path).parse()
+        self.data_parser = DataParser(self.path, self.meta, self.header, self.samples)
+
+        self.addInfoProcessor(VEPInfoProcessor(self.meta))
+        self.addInfoProcessor(SnpEffInfoProcessor(self.meta))
+        self.addInfoProcessor(CsvAlleleParser(self.meta))
 
     def getHeader(self):
         return self.header
@@ -379,9 +413,11 @@ class VcfIterator(object):
     def getSamples(self):
         return self.samples
 
+    def addInfoProcessor(self, processor):
+        self.data_parser.addInfoProcessor(processor)
+
     def iter(self):
-        d = DataParser(self.path, self.meta, self.header, self.samples)
-        for r in d.iter():
+        for r in self.data_parser.iter():
             yield r
 
 
