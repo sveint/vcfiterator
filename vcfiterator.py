@@ -60,11 +60,30 @@ class BaseInfoProcessor(object):
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
-    def accepts(self, key, value):
+    def accepts(self, key, value, processed):
+        """
+        Checks whether this info processor should be run for this key/value.
+
+        :param key: The key of the INFO field.
+        :param value: The string value for this field.
+        :param processed: Tells whether another processor has already accepted this field.
+
+        """
         pass
 
     @abc.abstractmethod
-    def process(self, key, value, info_data, alleles):
+    def process(self, key, value, info_data, alleles, processed):
+        """
+        For processing the incoming key, value pair, inserting the data into info_data
+        however is seen fit. Is only invoked if accepts returned True.
+
+        :param key: The key of the INFO field.
+        :param value: The string value for this field.
+        :param info_data: INFO data structure for inserting data into.
+        :param alleles: List of alleles (strings) for this value. In practice same as ALT field.
+        :param processed: Tells whether another processor has already accepted this field.
+
+        """
         pass
 
 
@@ -101,10 +120,10 @@ class VEPInfoProcessor(BaseInfoProcessor):
             return fields
         return list()
 
-    def accepts(self, key, value):
+    def accepts(self, key, value, processed):
         return key == VEPInfoProcessor.field
 
-    def process(self, key, value, info_data, alleles):
+    def process(self, key, value, info_data, alleles, processed):
         transcripts = value.split(',')
 
         all_data = [
@@ -155,10 +174,10 @@ class SnpEffInfoProcessor(BaseInfoProcessor):
             return fields
         return list()
 
-    def accepts(self, key, value):
+    def accepts(self, key, value, processed):
         return key == SnpEffInfoProcessor.field
 
-    def process(self, key, value, info_data, alleles):
+    def process(self, key, value, info_data, alleles, processed):
         transcripts = value.split(',')
 
         all_data = [
@@ -182,10 +201,10 @@ class CsvAlleleParser(BaseInfoProcessor):
         self.meta = meta
         self.conv_func = Util.conv_to_number
 
-    def accepts(self, key, value):
+    def accepts(self, key, value, processed):
         return key in CsvAlleleParser.fields
 
-    def process(self, key, value, info_data, alleles):
+    def process(self, key, value, info_data, alleles, processed):
         allele_values = value.split(',')
         if not len(allele_values) == len(alleles):
             raise RuntimeError("Number of allele values for {} not matching number of alleles".format(key))
@@ -334,8 +353,8 @@ class DataParser(object):
                 # Data is inserted into info_data by the functions
                 processed = False
                 for processor in self.infoProcessors:
-                    if processor.accepts(key, value):
-                        processor.process(key, value, info_data, alleles)
+                    if processor.accepts(key, value, processed):
+                        processor.process(key, value, info_data, alleles, processed)
                         processed = True
                 # If no processors handled the data, use the native header processor
                 if not processed:
