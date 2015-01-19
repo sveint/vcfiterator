@@ -98,18 +98,19 @@ class VEPInfoProcessor(BaseInfoProcessor):
         self.meta = meta
         self.fields = self._parseFieldsFromMeta()
         self.converters = {
-            'AA_MAF': float,
-            'AFR_MAF': float,
-            'AMR_MAF': float,
+            'AA_MAF': self._parseMAF,
+            'AFR_MAF': self._parseMAF,
+            'AMR_MAF': self._parseMAF,
             'ALLELE_NUM': int,
-            'ASN_MAF': float,
-            'CDS_position': int,
-            'cDNA_position': int,
-            'EA_MAF': float,
-            'EUR_MAF': float,
+            'ASN_MAF': self._parseMAF,
+            'CDS_position': str,
+            'cDNA_position': str,
+            'EA_MAF': self._parseMAF,
+            'EUR_MAF': self._parseMAF,
+            'GMAF': self._parseMAF,
             'DISTANCE': int,
             'STRAND': int,
-            'Protein_position': int,
+            'Protein_position': str,
             'PUBMED': lambda x: x.split('&'),
         }
 
@@ -119,6 +120,10 @@ class VEPInfoProcessor(BaseInfoProcessor):
             fields = info_line['Description'].split('Format: ', 1)[1].split('|')
             return fields
         return list()
+
+    def _parseMAF(self, val):
+        v = val.split(':')
+        return dict(zip(v[0::2], v[1::2]))
 
     def accepts(self, key, value, processed):
         return key == VEPInfoProcessor.field
