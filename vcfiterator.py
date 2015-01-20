@@ -86,6 +86,37 @@ class BaseInfoProcessor(object):
         """
         pass
 
+    def getConvertFunction(self, meta, key):
+        # Search for meta item
+        f = next((m for m in meta['INFO'] if m['ID'] == key), None)
+        func = lambda x: x
+        if f:
+            parse_func = str
+            if f['Type'] == 'Integer':
+                parse_func = int
+            elif f['Type'] in ['Number', 'Double', 'Float']:
+                parse_func = float
+            elif f['Type'] == 'Flag':
+                parse_func = bool
+            elif f['Type'] == 'String':
+                parse_func = str
+
+            number = f['Number']
+
+            try:
+                # Number == int
+                n = int(number)
+                func = Util.split_and_convert(parse_func, split_max=n, extract_single=True)
+            except ValueError:
+                # Number == Allele specific
+                if number == 'A':
+                    func = Util.split_and_convert(parse_func)
+                # Number == Unknown
+                else:
+                    func = parse_func
+
+        return func
+
 
 class VEPInfoProcessor(BaseInfoProcessor):
     """
@@ -218,6 +249,32 @@ class CsvAlleleParser(BaseInfoProcessor):
             info_data[allele][key] = self.conv_func(allele_values[a_idx])
 
 
+class NativeInfoProcessor(BaseInfoProcessor):
+        """
+        Fallback processor, invoked if none of the custom ones accepted the data.
+
+        It searches the INFO fields in the header metadata, trying to use the specified type and length.
+
+        Unlike custom processors (e.g. VEPInfoProcessor), it does not generate allele specific data. Instead, all data is put
+        into the 'ALL' key in 'INFO' in the resulting dictionary.
+        """
+
+        def __init__(self, meta):
+            self.meta = meta
+
+        def accepts(self, key, value, processed):
+            return not processed
+
+        def process(self, key, value, info_data, alleles):
+
+            if isinstance(value, bool):
+                info_data['ALL'][key] = value
+            else:
+                func = self.getConvertFunction(self.meta, key)
+                # We ignore alleles for these values, but return them in the 'ALL' key
+                info_data['ALL'][key] = func(value)
+
+
 class HeaderParser(object):
     """
     Class for parsing the header part of the vcf and returns the metadata and header data.
@@ -286,53 +343,10 @@ class DataParser(object):
         self.samples = samples
 
         self.infoProcessors = list()
+        self.fallbackProcessor = NativeInfoProcessor(meta)
 
     def addInfoProcessor(self, processor):
         self.infoProcessors.append(processor)
-
-    def _nativeInfoProcessor(self, key, value, info_data, alleles):
-        """
-        Fallback processor, invoked if none of the custom ones accepted the data.
-
-        It searched the INFO fields in the header metadata, trying to use the specified type and length.
-
-        Unlike custom processors (e.g. VEPInfoProcessor), it does not generate allele specific data. Instead, all data is put
-        into the 'ALL' key in 'INFO' in the resulting dictionary.
-        """
-
-        # Search for meta item
-        f = next((m for m in self.meta['INFO'] if m['ID'] == key), None)
-        if f:
-            parse_func = str
-            if f['Type'] == 'Integer':
-                parse_func = int
-            elif f['Type'] in ['Number', 'Double', 'Float']:
-                parse_func = float
-            elif f['Type'] == 'Flag':
-                parse_func = bool
-            elif f['Type'] == 'String':
-                parse_func = str
-
-            number = f['Number']
-
-            try:
-                # Number == int
-                n = int(number)
-                func = Util.split_and_convert(parse_func, split_max=n, extract_single=True)
-            except ValueError:
-                # Number == Allele specific
-                if number == 'A':
-                    func = Util.split_and_convert(parse_func)
-                # Number == Unknown
-                else:
-                    func = parse_func
-
-            # We ignore alleles for these values, but return them in the 'ALL' key
-            info_data['ALL'][key] = func(value)
-
-        else:
-            # Value not recognized in header, insert as is
-            info_data['ALL'][key] = value
 
     def _parseDataInfoField(self, data):
         """
@@ -354,18 +368,18 @@ class DataParser(object):
         for f in fields:
             if '=' in f:
                 key, value = f.split('=', 1)
-                # Process keys by processor, if present, or use native processor
-                # Data is inserted into info_data by the functions
-                processed = False
-                for processor in self.infoProcessors:
-                    if processor.accepts(key, value, processed):
-                        processor.process(key, value, info_data, alleles, processed)
-                        processed = True
-                # If no processors handled the data, use the native header processor
-                if not processed:
-                    self._nativeInfoProcessor(key, value, info_data, alleles)
             else:
-                info_data['ALL'][f] = True
+                key, value = f, True
+            # Process keys by processor, if present, or use native processor
+            # Data is inserted into info_data by the functions
+            processed = False
+            for processor in self.infoProcessors:
+                if processor.accepts(key, value, processed):
+                    processor.process(key, value, info_data, alleles, processed)
+                    processed = True
+            # If no processors handled the data, use the native header processor
+            if not processed:
+                self.fallbackProcessor.process(key, value, info_data, alleles)
 
         data['INFO'] = info_data
 
