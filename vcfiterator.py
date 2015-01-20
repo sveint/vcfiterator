@@ -33,6 +33,8 @@ class Util(object):
             return float(value)
         except ValueError:
             pass
+        if isinstance(value, str):
+            return value.decode('latin-1', 'replace')
         return value
 
     @staticmethod
@@ -89,7 +91,7 @@ class BaseInfoProcessor(object):
     def getConvertFunction(self, meta, key):
         # Search for meta item
         f = next((m for m in meta['INFO'] if m['ID'] == key), None)
-        func = lambda x: x
+        func = lambda x: x.decode('latin-1', 'replace')
         if f:
             parse_func = str
             if f['Type'] == 'Integer':
@@ -99,7 +101,7 @@ class BaseInfoProcessor(object):
             elif f['Type'] == 'Flag':
                 parse_func = bool
             elif f['Type'] == 'String':
-                parse_func = str
+                parse_func = lambda x: x.decode('latin-1', 'replace')
 
             number = f['Number']
 
@@ -134,15 +136,12 @@ class VEPInfoProcessor(BaseInfoProcessor):
             'AMR_MAF': self._parseMAF,
             'ALLELE_NUM': int,
             'ASN_MAF': self._parseMAF,
-            'CDS_position': str,
-            'cDNA_position': str,
             'EA_MAF': self._parseMAF,
             'EUR_MAF': self._parseMAF,
             'GMAF': self._parseMAF,
             'DISTANCE': int,
             'STRAND': int,
-            'Protein_position': str,
-            'PUBMED': lambda x: x.split('&'),
+            'PUBMED': lambda x: [int(i) for i in x.split('&')],
         }
 
     def _parseFieldsFromMeta(self):
@@ -164,7 +163,7 @@ class VEPInfoProcessor(BaseInfoProcessor):
 
         all_data = [
             {
-                k: self.converters.get(k, lambda x: x)(v) for k, v in zip(self.fields, t.split('|')) if v is not ''
+                k: self.converters.get(k, lambda x: x.decode('latin-1', 'replace'))(v) for k, v in zip(self.fields, t.split('|')) if v is not ''
             } for t in transcripts
         ]
 
@@ -218,7 +217,7 @@ class SnpEffInfoProcessor(BaseInfoProcessor):
 
         all_data = [
             {
-                k: self.converters.get(k, lambda x: x)(v) for k, v in zip(self.fields, self._parseFormat(t)) if v is not ''
+                k: self.converters.get(k, lambda x: x.decode('latin-1', 'replace'))(v) for k, v in zip(self.fields, self._parseFormat(t)) if v is not ''
             } for t in transcripts
         ]
 
