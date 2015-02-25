@@ -33,8 +33,6 @@ class Util(object):
             return float(value)
         except ValueError:
             pass
-        if isinstance(value, str):
-            return value.decode('latin-1', 'replace')
         return value
 
     @staticmethod
@@ -115,7 +113,10 @@ class BaseInfoProcessor(object):
                     func = Util.split_and_convert(parse_func)
                 # Number == Unknown
                 else:
-                    func = parse_func
+                    if f['Type'] == 'Integer':
+                        func = Util.split_and_convert(parse_func, extract_single=True)
+                    else:
+                        func = parse_func
 
         return func
 
