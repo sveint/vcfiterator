@@ -21,6 +21,18 @@ SPEC_FIELDS = [
 class Util(object):
 
     @staticmethod
+    def dot_to_none(func):
+        """
+        Checks if value is '.' and returns None if true.
+        Otherwise, func will be called.
+        """
+        def wrapper(val):
+            if val == '.':
+                return None
+            return func(val)
+        return wrapper
+
+    @staticmethod
     def conv_to_number(value):
         """
         Tries to convert a string to a number, silently returning the originally value if it fails.
@@ -93,13 +105,13 @@ class BaseInfoProcessor(object):
         if f:
             parse_func = str
             if f['Type'] == 'Integer':
-                parse_func = int
+                parse_func = Util.dot_to_none(int)
             elif f['Type'] in ['Number', 'Double', 'Float']:
-                parse_func = float
+                parse_func = Util.dot_to_none(float)
             elif f['Type'] == 'Flag':
-                parse_func = bool
+                parse_func = Util.dot_to_none(bool)
             elif f['Type'] == 'String':
-                parse_func = lambda x: x.decode('latin-1', 'replace')
+                parse_func = Util.dot_to_none(lambda x: x.decode('latin-1', 'replace'))
 
             number = f['Number']
 
