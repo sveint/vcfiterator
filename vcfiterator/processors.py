@@ -1,75 +1,14 @@
-import sys
-from collections import defaultdict
-import re
 import abc
 
-
-# Official fields in specification
-SPEC_FIELDS = [
-    'CHROM',
-    'POS',
-    'ID',
-    'REF',
-    'ALT',
-    'QUAL',
-    'FILTER',
-    'INFO',
-    'FORMAT'
-]
-
-
-class Util(object):
-
-    @staticmethod
-    def dot_to_none(func):
-        """
-        Checks if value is '.' and returns None if true.
-        Otherwise, func will be called.
-        """
-        def wrapper(val):
-            if val == '.':
-                return None
-            return func(val)
-        return wrapper
-
-    @staticmethod
-    def conv_to_number(value):
-        """
-        Tries to convert a string to a number, silently returning the originally value if it fails.
-        """
-        try:
-            return int(value)
-        except ValueError:
-            pass
-        try:
-            return float(value)
-        except ValueError:
-            pass
-        return value
-
-    @staticmethod
-    def split_and_convert(conv_func, split_max=-1, extract_single=False):
-        """
-        Performs a normal split() on a string, with support for converting the values and extraction of single values.
-
-        :param conv_func: Function for converting the values
-        :type conv_func: functions
-        :param split_max: Maximum number of splits to perform. Default: No limit.
-        :type split_max: int
-        :param extract_single: If value ends up being a single value, do not return a list. Default: False
-        :type extract_single: bool
-        """
-        def inner(x):
-            l = [conv_func(i) for i in x.split(',', split_max)]
-            if len(l) == 1 and extract_single:
-                l = l[0]
-            return l
-        return inner
+from vcfiterator.util import Util
 
 
 class BaseInfoProcessor(object):
 
     __metaclass__ = abc.ABCMeta
+
+    def __init__(self, meta):
+        self.meta = meta
 
     @abc.abstractmethod
     def accepts(self, key, value, processed):
@@ -141,7 +80,8 @@ class VEPInfoProcessor(BaseInfoProcessor):
     field = 'CSQ'
 
     def __init__(self, meta):
-        self.meta = meta
+        super(VEPInfoProcessor, self).__init__(meta)
+
         self.fields = self._parseFieldsFromMeta()
         self.converters = {
             'AA_MAF': self._parseMAF,
@@ -206,7 +146,8 @@ class SnpEffInfoProcessor(BaseInfoProcessor):
     field = 'EFF'
 
     def __init__(self, meta):
-        self.meta = meta
+        super(SnpEffInfoProcessor, self).__init__(meta)
+
         self.fields = self._parseFieldsFromMeta()
         self.converters = {
             'Genotype_Number': int,
@@ -260,7 +201,7 @@ class CsvAlleleParser(BaseInfoProcessor):
     fields = ['AC', 'AF', 'MLEAC', 'MLEAF']
 
     def __init__(self, meta):
-        self.meta = meta
+        super(CsvAlleleParser, self).__init__(meta)
         self.conv_func = Util.conv_to_number
 
     def accepts(self, key, value, processed):
@@ -286,7 +227,7 @@ class NativeInfoProcessor(BaseInfoProcessor):
         """
 
         def __init__(self, meta):
-            self.meta = meta
+            super(NativeInfoProcessor, self).__init__(meta)
 
         def accepts(self, key, value, processed):
             return not processed
@@ -299,205 +240,3 @@ class NativeInfoProcessor(BaseInfoProcessor):
                 func = self.getConvertFunction(self.meta, key)
                 # We ignore alleles for these values, but return them in the 'ALL' key
                 info_data['ALL'][key] = func(value)
-
-
-class HeaderParser(object):
-    """
-    Class for parsing the header part of the vcf and returns the metadata and header data.
-    """
-
-    RE_INFO = re.compile(r'[<]*(.*?)=["]*(.*?)["]*[,>]')
-
-    def __init__(self, path):
-        self.path = path
-        self.metaProccessors = {
-            'INFO': self._parseMetaInfo,
-            'FILTER': self._parseMetaInfo,
-            'FORMAT': self._parseMetaInfo
-        }
-
-    def _getSamples(self, header):
-        return [field for field in header if field not in SPEC_FIELDS]
-
-    def _parseMetaInfo(self, infoline):
-        groups = re.findall(HeaderParser.RE_INFO, infoline)
-        info = {k: v for k, v in groups}
-        return info
-
-    def _parseHeader(self):
-        meta = defaultdict(list)
-        header = list()
-
-        # Read in metadata and header
-        with open(self.path) as fd:
-            for line in fd.xreadlines():
-                line = line.replace('\n', '')
-                if line.startswith('##'):
-                    key, value = line[2:].split('=', 1)
-                    meta[key].append(value)
-                elif(line.startswith('#')):
-                    line = line.replace('#', '')
-                    header = line.split('\t')
-                else:
-                    # End of header
-                    break
-
-        # Extract data with processors
-        for key, func in self.metaProccessors.iteritems():
-            if key in meta:
-                for idx, value in enumerate(meta[key]):
-                    meta[key][idx] = func(value)
-
-        # Extract value from single-item lists ([val] -> val):
-        for k, v in meta.iteritems():
-            if len(v) == 1:
-                meta[k] = v[0]
-
-        samples = self._getSamples(header)
-        return meta, header, samples
-
-    def parse(self):
-        return self._parseHeader()
-
-
-class DataParser(object):
-
-    def __init__(self, path, meta, header, samples):
-        self.path = path
-        self.meta = meta
-        self.header = header
-        self.samples = samples
-
-        self.infoProcessors = list()
-        self.fallbackProcessor = NativeInfoProcessor(meta)
-
-    def addInfoProcessor(self, processor):
-        self.infoProcessors.append(processor)
-
-    def _parseDataInfoField(self, data):
-        """
-        Parses the INFO data into data structures.
-        Data is split into general ('ALL') and allele specific data.
-        """
-
-        alleles = data['ALT']
-
-        fields = data['INFO'].split(';')
-
-        # Create dict for allele specific INFO
-        info_data = {
-            k: dict() for k in alleles
-        }
-        # And include INFO for 'ALL' alleles
-        info_data['ALL'] = dict()
-
-        for f in fields:
-            if '=' in f:
-                key, value = f.split('=', 1)
-            else:
-                key, value = f, True
-            # Process keys by processor, if present, or use native processor
-            # Data is inserted into info_data by the functions
-            processed = False
-            for processor in self.infoProcessors:
-                if processor.accepts(key, value, processed):
-                    processor.process(key, value, info_data, alleles, processed)
-                    processed = True
-            # If no processors handled the data, use the native header processor
-            if not processed:
-                self.fallbackProcessor.process(key, value, info_data, alleles)
-
-        data['INFO'] = info_data
-
-    def _parseDataSampleFields(self, data):
-        sample_format = data['FORMAT'].split(':')
-
-        samples = dict()
-        extract = Util.split_and_convert(Util.conv_to_number, extract_single=True)
-        for sample_name in self.samples:
-            sample_text = data.pop(sample_name)
-            samples[sample_name] = {
-                k: extract(v) for k, v in zip(sample_format, sample_text.split(':'))
-            }
-
-        data['SAMPLES'] = samples
-
-        del data['FORMAT']
-
-    def _parseData(self, line):
-        data = {
-            k: v for k, v in zip(self.header, line.split('\t'))
-        }
-
-        # Split by alleles
-        data['ALT'] = data['ALT'].split(',')
-
-        self._parseDataInfoField(data)
-
-        self._parseDataSampleFields(data)
-
-        # Manual conversion
-        data['POS'] = Util.conv_to_number(data['POS'])
-        data['QUAL'] = Util.conv_to_number(data['QUAL'])
-
-        return data
-
-    def iter(self, throw_exceptions=True):
-        found_data_start = False
-        with open(self.path) as fd:
-            for line_idx, line in enumerate(fd.xreadlines()):
-                # Skip header, wait for #CHROM to signal start of data
-                if line.startswith('#CHROM') and not found_data_start:
-                    found_data_start = True
-                    continue
-                if not found_data_start:
-                    continue
-                line = line.replace('\n', '')
-                try:
-                    data = self._parseData(line)
-                except Exception:
-                    if throw_exceptions:
-                        raise
-                    else:
-                        sys.stderr.write("WARNING: Line {} failed to parse: \n {}".format(line_idx, line))
-
-                yield data
-
-
-class VcfIterator(object):
-
-    def __init__(self, path):
-        self.path = path
-        self.meta, self.header, self.samples = HeaderParser(self.path).parse()
-        self.data_parser = DataParser(self.path, self.meta, self.header, self.samples)
-
-        self.addInfoProcessor(VEPInfoProcessor(self.meta))
-        self.addInfoProcessor(SnpEffInfoProcessor(self.meta))
-        self.addInfoProcessor(CsvAlleleParser(self.meta))
-
-    def getHeader(self):
-        return self.header
-
-    def getMeta(self):
-        return self.meta
-
-    def getSamples(self):
-        return self.samples
-
-    def addInfoProcessor(self, processor):
-        self.data_parser.addInfoProcessor(processor)
-
-    def iter(self, throw_exceptions=True):
-        for r in self.data_parser.iter(throw_exceptions=throw_exceptions):
-            yield r
-
-
-if __name__ == '__main__':
-    import json
-
-    path = sys.argv[1]
-    v = VcfIterator(path)
-
-    for value in v.iter():
-        print json.dumps(value, indent=4)
-
