@@ -232,13 +232,3 @@ class VcfIterator(object):
     def iter(self, throw_exceptions=True):
         for r in self.data_parser.iter(throw_exceptions=throw_exceptions):
             yield r
-
-
-if __name__ == '__main__':
-    import json
-
-    path = sys.argv[1]
-    v = VcfIterator(path)
-
-    for value in v.iter():
-        print json.dumps(value, indent=4)
