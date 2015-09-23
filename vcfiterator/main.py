@@ -26,8 +26,8 @@ class HeaderParser(object):
 
     RE_INFO = re.compile(r'[<]*(.*?)=["]*(.*?)["]*[,>]')
 
-    def __init__(self, path):
-        self.path = path
+    def __init__(self, path_or_f):
+        self.path_or_f = path_or_f
         self.metaProccessors = {
             'INFO': self._parseMetaInfo,
             'FILTER': self._parseMetaInfo,
@@ -42,23 +42,34 @@ class HeaderParser(object):
         info = {k: v for k, v in groups}
         return info
 
+    def _get_file_obj(self):
+        """
+        Checks whether input was a path or an open file object.
+        In either case, return an open file object.
+        """
+        if isinstance(self.path_or_f, basestring):
+            f = open(self.path_or_f)
+            return f
+        self.path_or_f.seek(0)
+        return self.path_or_f
+
     def _parseHeader(self):
         meta = defaultdict(list)
         header = list()
 
         # Read in metadata and header
-        with open(self.path) as fd:
-            for line in fd.xreadlines():
-                line = line.replace('\n', '')
-                if line.startswith('##'):
-                    key, value = line[2:].split('=', 1)
-                    meta[key].append(value)
-                elif(line.startswith('#')):
-                    line = line.replace('#', '')
-                    header = line.split('\t')
-                else:
-                    # End of header
-                    break
+        f = self._get_file_obj()
+        for line in f.xreadlines():
+            line = line.replace('\n', '')
+            if line.startswith('##'):
+                key, value = line[2:].split('=', 1)
+                meta[key].append(value)
+            elif(line.startswith('#')):
+                line = line.replace('#', '')
+                header = line.split('\t')
+            else:
+                # End of header
+                break
 
         # Extract data with processors
         for key, func in self.metaProccessors.iteritems():
@@ -80,8 +91,8 @@ class HeaderParser(object):
 
 class DataParser(object):
 
-    def __init__(self, path, meta, header, samples):
-        self.path = path
+    def __init__(self, path_or_f, meta, header, samples):
+        self.path_or_f = path_or_f
         self.meta = meta
         self.header = header
         self.samples = samples
@@ -142,6 +153,17 @@ class DataParser(object):
 
         del data['FORMAT']
 
+    def _get_file_obj(self):
+        """
+        Checks whether input was a path or an open file object.
+        In either case, return an open file object.
+        """
+        if isinstance(self.path_or_f, basestring):
+            f = open(self.path_or_f)
+            return f
+        self.path_or_f.seek(0)
+        return self.path_or_f
+
     def _parseData(self, line):
         data = {
             k: v for k, v in zip(self.header, line.split('\t'))
@@ -162,8 +184,9 @@ class DataParser(object):
 
     def iter(self, throw_exceptions=True):
         found_data_start = False
-        with open(self.path) as fd:
-            for line_idx, line in enumerate(fd.xreadlines()):
+        f = self._get_file_obj()
+        try:
+            for line_idx, line in enumerate(f.xreadlines()):
                 # Skip header, wait for #CHROM to signal start of data
                 if line.startswith('#CHROM') and not found_data_start:
                     found_data_start = True
@@ -180,14 +203,16 @@ class DataParser(object):
                         sys.stderr.write("WARNING: Line {} failed to parse: \n {}".format(line_idx, line))
 
                 yield data
+        finally:
+            f.close()
 
 
 class VcfIterator(object):
 
-    def __init__(self, path):
-        self.path = path
-        self.meta, self.header, self.samples = HeaderParser(self.path).parse()
-        self.data_parser = DataParser(self.path, self.meta, self.header, self.samples)
+    def __init__(self, path_or_f):
+        self.path_or_f = path_or_f
+        self.meta, self.header, self.samples = HeaderParser(self.path_or_f).parse()
+        self.data_parser = DataParser(self.path_or_f, self.meta, self.header, self.samples)
 
         # Add by default
         self.addInfoProcessor(CsvAlleleParser)
