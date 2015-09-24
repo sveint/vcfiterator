@@ -84,11 +84,13 @@ class TestHeaderParser(unittest.TestCase):
 
 class TestDataParser(unittest.TestCase):
 
-    def test_general_parsing(self):
+    def get_data(self):
         v = '20\t14370\trs6054257\tG\tA\t29\tPASS\tNS=3;DP=14;AF=0.5;DB;H2\tGT:GQ:DP:HQ\t0|0:48:1:51,51\t1|0:48:8:51,51\t1/1:43:5:.,.'
         vi = VcfIterator(get_vcf_file_obj(v))
-        data = list(vi.iter())[0]
+        return list(vi.iter())[0]
 
+    def test_general_parsing(self):
+        data = self.get_data()
         self.assertEquals(data['CHROM'], '20')
         self.assertEquals(data['POS'], 14370)
         self.assertEquals(data['ID'], 'rs6054257')
@@ -98,9 +100,7 @@ class TestDataParser(unittest.TestCase):
         self.assertEquals(data['FILTER'], 'PASS')
 
     def test_sample_parsing(self):
-        v = '20\t14370\trs6054257\tG\tA\t29\tPASS\tNS=3;DP=14;AF=0.5;DB;H2\tGT:GQ:DP:HQ\t0|0:48:1:51,51\t1|0:48:8:51,51\t1/1:43:5:.,.'
-        vi = VcfIterator(get_vcf_file_obj(v))
-        data = list(vi.iter())[0]
+        data = self.get_data()
         self.assertIn('TESTSAMPLE1', data['SAMPLES'])
         self.assertIn('TESTSAMPLE2', data['SAMPLES'])
         self.assertIn('TESTSAMPLE3', data['SAMPLES'])
