@@ -42,15 +42,13 @@ class BaseInfoProcessor(object):
         f = next((m for m in meta['INFO'] if m['ID'] == key), None)
         func = lambda x: x.decode('latin-1', 'replace')
         if f:
-            parse_func = str
+            parse_func = Util.dot_to_none(lambda x: x.decode('latin-1', 'replace'))
             if f['Type'] == 'Integer':
                 parse_func = Util.dot_to_none(int)
             elif f['Type'] in ['Number', 'Double', 'Float']:
                 parse_func = Util.dot_to_none(float)
             elif f['Type'] == 'Flag':
                 parse_func = Util.dot_to_none(bool)
-            elif f['Type'] == 'String':
-                parse_func = Util.dot_to_none(lambda x: x.decode('latin-1', 'replace'))
 
             number = f['Number']
 
