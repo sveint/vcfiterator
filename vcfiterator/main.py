@@ -182,7 +182,7 @@ class DataParser(object):
 
         return data
 
-    def iter(self, throw_exceptions=True):
+    def iter(self, throw_exceptions=True, include_raw=False):
         found_data_start = False
         f = self._get_file_obj()
         try:
@@ -201,8 +201,10 @@ class DataParser(object):
                         raise
                     else:
                         sys.stderr.write("WARNING: Line {} failed to parse: \n {}".format(line_idx, line))
-
-                yield data
+                if not include_raw:
+                    yield data
+                else:
+                    yield line, data
         finally:
             f.close()
 
@@ -229,6 +231,6 @@ class VcfIterator(object):
     def addInfoProcessor(self, processor):
         self.data_parser.addInfoProcessor(processor(self.meta))
 
-    def iter(self, throw_exceptions=True):
-        for r in self.data_parser.iter(throw_exceptions=throw_exceptions):
+    def iter(self, throw_exceptions=True, include_raw=False):
+        for r in self.data_parser.iter(throw_exceptions=throw_exceptions, include_raw=include_raw):
             yield r
