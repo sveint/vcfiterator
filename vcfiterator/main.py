@@ -139,6 +139,9 @@ class DataParser(object):
         data['INFO'] = info_data
 
     def _parseDataSampleFields(self, data):
+        if 'FORMAT' not in data:
+            return
+
         sample_format = data['FORMAT'].split(':')
 
         samples = dict()
