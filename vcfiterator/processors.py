@@ -132,8 +132,11 @@ class VEPInfoProcessor(BaseInfoProcessor):
             } for t in transcripts
         ]
 
-        for a_idx, allele in enumerate(alleles):
-            info_data[allele][key] = [d for d in all_data if d['ALLELE_NUM']-1 == a_idx]
+        if len(alleles) == 1:
+            info_data[alleles[0]][key] = all_data
+        else:
+            for a_idx, allele in enumerate(alleles):
+                info_data[allele][key] = [d for d in all_data if d['ALLELE_NUM']-1 == a_idx]
 
 
 class SnpEffInfoProcessor(BaseInfoProcessor):
